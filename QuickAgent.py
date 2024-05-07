@@ -5,6 +5,7 @@ import subprocess
 import requests
 import time
 import os
+import datetime
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
@@ -31,8 +32,10 @@ load_dotenv()
 class LanguageModelProcessor:
     def __init__(self):
         self.llm = ChatGroq(temperature=0, model_name="mixtral-8x7b-32768", groq_api_key=os.getenv("GROQ_API_KEY"))
-        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4-0125-preview", openai_api_key=os.getenv("OPENAI_API_KEY"))
-        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-0125", openai_api_key=os.getenv("OPENAI_API_KEY"))
+        # self.llm = ChatGroq(temperature=0, model_name="llama3-8b-8192", groq_api_key=os.getenv("GROQ_API_KEY"))
+        # self.llm = ChatGroq(temperature=0, model_name="llama3-70b-8192", groq_api_key=os.getenv("GROQ_API_KEY"))
+        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo", openai_api_key=os.getenv("OPENAI_API_KEY"))
+        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4", openai_api_key=os.getenv("OPENAI_API_KEY"))
 
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
@@ -64,7 +67,7 @@ class LanguageModelProcessor:
         self.memory.chat_memory.add_ai_message(response['text'])  # Add AI response to memory
 
         elapsed_time = int((end_time - start_time) * 1000)
-        print(f"LLM ({elapsed_time}ms): {response['text']}")
+        print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} LLM ({elapsed_time}ms): {response['text']}")
         return response['text']
 
 class TextToSpeech:
@@ -101,15 +104,17 @@ class TextToSpeech:
         start_time = time.time()  # Record the time before sending the request
         first_byte_time = None  # Initialize a variable to store the time when the first byte is received
 
+        print ("Speeking...")
         with requests.post(DEEPGRAM_URL, stream=True, headers=headers, json=payload) as r:
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk:
                     if first_byte_time is None:  # Check if this is the first chunk received
                         first_byte_time = time.time()  # Record the time when the first byte is received
                         ttfb = int((first_byte_time - start_time)*1000)  # Calculate the time to first byte
-                        print(f"TTS Time to First Byte (TTFB): {ttfb}ms\n")
+                        print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS start, Time to First Byte (TTFB): {ttfb}ms\n")
                     player_process.stdin.write(chunk)
                     player_process.stdin.flush()
+            print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS finished\n")
 
         if player_process.stdin:
             player_process.stdin.close()
@@ -143,9 +148,11 @@ async def get_transcript(callback):
 
         async def on_message(self, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
-            
+            print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} Received: {sentence}")
+
             if not result.speech_final:
-                transcript_collector.add_part(sentence)
+                if(result.is_final):
+                    transcript_collector.add_part(sentence)
             else:
                 # This is the final part of the current sentence
                 transcript_collector.add_part(sentence)
@@ -153,7 +160,7 @@ async def get_transcript(callback):
                 # Check if the full_sentence is not empty before printing
                 if len(full_sentence.strip()) > 0:
                     full_sentence = full_sentence.strip()
-                    print(f"Human: {full_sentence}")
+                    print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} Human: {full_sentence}")
                     callback(full_sentence)  # Call the callback with the full_sentence
                     transcript_collector.reset()
                     transcription_complete.set()  # Signal to stop transcription and exit
@@ -167,6 +174,10 @@ async def get_transcript(callback):
             encoding="linear16",
             channels=1,
             sample_rate=16000,
+            # To get UtteranceEnd, the following must be set:
+            interim_results=True,
+            utterance_end_ms="1000",
+            vad_events=True,
             endpointing=300,
             smart_format=True,
         )
