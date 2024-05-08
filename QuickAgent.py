@@ -6,6 +6,9 @@ import requests
 import time
 import os
 import datetime
+import threading
+import select
+import sys
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
@@ -80,6 +83,14 @@ class TextToSpeech:
         lib = shutil.which(lib_name)
         return lib is not None
 
+    def get_input(self, player_process):
+        print("(Press 'enter' within 60 seconds to stop Speeking)")
+        i, o, e = select.select([sys.stdin], [], [], 60)  # Wait for 60 seconds for input
+        if i:
+            text = sys.stdin.readline().strip()
+            if "" == text:
+                player_process.terminate()
+
     def speak(self, text):
         if not self.is_installed("ffplay"):
             raise ValueError("ffplay not found, necessary to stream audio.")
@@ -104,21 +115,27 @@ class TextToSpeech:
         start_time = time.time()  # Record the time before sending the request
         first_byte_time = None  # Initialize a variable to store the time when the first byte is received
 
-        print ("Speeking...")
-        with requests.post(DEEPGRAM_URL, stream=True, headers=headers, json=payload) as r:
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    if first_byte_time is None:  # Check if this is the first chunk received
-                        first_byte_time = time.time()  # Record the time when the first byte is received
-                        ttfb = int((first_byte_time - start_time)*1000)  # Calculate the time to first byte
-                        print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS start, Time to First Byte (TTFB): {ttfb}ms\n")
-                    player_process.stdin.write(chunk)
-                    player_process.stdin.flush()
-            print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS finished\n")
+        thread = threading.Thread(target=self.get_input, args=(player_process,))
+        thread.start()
+        print ("Speaking...")
+        try:
+            with requests.post(DEEPGRAM_URL, stream=True, headers=headers, json=payload) as r:
+                for chunk in r.iter_content(chunk_size=1024):
+                    if chunk:
+                        if first_byte_time is None:  # Check if this is the first chunk received
+                            first_byte_time = time.time()  # Record the time when the first byte is received
+                            ttfb = int((first_byte_time - start_time)*1000)  # Calculate the time to first byte
+                            print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS start, Time to First Byte (TTFB): {ttfb}ms\n")
+                        if player_process.poll() is None:  # 如果player_process还在运行
+                            player_process.stdin.write(chunk)
+                            player_process.stdin.flush()
+                print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} TTS finished\n")
 
-        if player_process.stdin:
-            player_process.stdin.close()
-        player_process.wait()
+            if player_process.stdin:
+                player_process.stdin.close()
+            player_process.wait()
+        except Exception as e:
+            print(f"Error occurred: {e}")
 
 class TranscriptCollector:
     def __init__(self):
