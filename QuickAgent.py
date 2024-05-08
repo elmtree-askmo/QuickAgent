@@ -148,7 +148,8 @@ async def get_transcript(callback):
 
         async def on_message(self, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
-            print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} Received: {sentence}")
+            if sentence != "":
+                print(f"{datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')} Received: {sentence}")
 
             if not result.speech_final:
                 if(result.is_final):
